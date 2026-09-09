@@ -23,6 +23,12 @@ npm test         # domain rules
   column, tasks carrying their pillar.
 - **`/songs`** — Song Production. Six stages, each contributing its checklist.
 
+Both boards render as **Kanban or List** — `?view=kanban` (default) or
+`?view=list`. The view lives in the URL, so it survives a refresh and can be
+bookmarked. List groups by the same buckets as Kanban and stays fully
+actionable: move a task, roll a recurring one forward, advance a song's stage.
+Kanban truncates long columns; List shows everything.
+
 ## What replaced the automations
 
 Sixty-five automations across two boards collapse into `src/domain/rules.ts`
