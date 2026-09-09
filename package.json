@@ -10,18 +10,21 @@
     "test": "tsx --test src/domain/*.test.ts"
   },
   "dependencies": {
-    "better-sqlite3": "11.10.0",
-    "next": "15.5.4",
+    "better-sqlite3": "^12.11.1",
+    "next": "15.5.25",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "7.6.13",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "22.15.3",
     "@types/react": "19.1.2",
     "@types/react-dom": "19.1.2",
     "playwright": "^1.50.1",
     "tsx": "4.19.3",
     "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=20.9"
   }
 }
