@@ -23,9 +23,12 @@ npm test         # domain rules
   column, tasks carrying their pillar.
 - **`/songs`** — Song Production. Six stages, each contributing its checklist.
 
-Both boards render as **Kanban or List** — `?view=kanban` (default) or
-`?view=list`. The view lives in the URL, so it survives a refresh and can be
-bookmarked. List groups by the same buckets as Kanban and stays fully
+Both boards render as **List (default) or Kanban** — `?view=list` or
+`?view=kanban`. The view lives in the URL, so it survives a refresh and can be
+bookmarked. List is the default because the columns are lopsided: 40 of 72
+tasks sit in the Parking Lot and 20 of 32 songs in Backlog, and Kanban
+truncates a column that long. Change `DEFAULT_VIEW` in
+`src/components/ViewToggle.tsx` to flip it back. List groups by the same buckets as Kanban and stays fully
 actionable: move a task, roll a recurring one forward, advance a song's stage.
 Kanban truncates long columns; List shows everything.
 
