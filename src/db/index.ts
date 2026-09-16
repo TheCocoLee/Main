@@ -43,12 +43,44 @@ export function getPool(): Pool {
   return g.__arcPool;
 }
 
+/**
+ * Supabase's direct host (db.<ref>.supabase.co) presents a self-signed
+ * certificate, so TLS verification fails against it by design. Rather than
+ * turning verification off, say which string to use instead.
+ */
+function explain(err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/self[- ]signed certificate/i.test(msg)) {
+    throw new Error(
+      'Postgres rejected the TLS certificate. DATABASE_URL is pointing at the ' +
+        'direct Supabase host (db.<ref>.supabase.co), which serves a self-signed ' +
+        'certificate. Use the Transaction pooler string instead — Supabase → ' +
+        'Project Settings → Database → Connection string → Transaction pooler. ' +
+        'The host looks like aws-0-<region>.pooler.supabase.com on port 6543.',
+      { cause: err },
+    );
+  }
+  if (/password authentication failed/i.test(msg)) {
+    throw new Error(
+      'Postgres rejected the password in DATABASE_URL. Reset it at Supabase → ' +
+        'Project Settings → Database → Reset database password, then paste the ' +
+        'new one into the connection string.',
+      { cause: err },
+    );
+  }
+  throw err;
+}
+
 export async function query<T extends QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const { rows } = await getPool().query<T>(text, params);
-  return rows;
+  try {
+    const { rows } = await getPool().query<T>(text, params);
+    return rows;
+  } catch (err) {
+    explain(err);
+  }
 }
 
 /** Run several statements atomically. */
