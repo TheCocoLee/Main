@@ -5,8 +5,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // better-sqlite3 is native; keep it out of the bundle.
-  serverExternalPackages: ['better-sqlite3'],
+  // pg opens real sockets; keep it out of the bundle.
+  serverExternalPackages: ['pg'],
 
   // Pin the workspace root. Without this Next walks up looking for a lockfile
   // and can land on one outside the project (a stray package-lock.json in the

@@ -31,7 +31,7 @@ export default async function SongsPage({
   searchParams: Promise<{ view?: string }>;
 }) {
   const view: ViewMode = parseView((await searchParams).view);
-  const songs = getSongs();
+  const songs = await getSongs();
 
   const focus = songs.find((s) => s.stage === 'tracking') ?? songs.find((s) => s.total > 0);
   const released = songs.find((s) => s.stage === 'released');

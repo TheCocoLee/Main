@@ -1,38 +1,22 @@
 /**
- * Seed Arc with the real contents of thecocolee.monday.com.
+ * Seed Arc from the real contents of thecocolee.monday.com.
  *
  * Sources:
  *   2026 Goals        (18393288742) — 45 items: 3 Core docs, 5 affirmations, 37 goals
  *   Coco Master Board (5760118855)  — 134 items
  *   song production   (18388779476) — 31 songs
+ *
+ * Idempotent: wipes and reloads. Run with `npm run seed`. Needs DATABASE_URL,
+ * and applies src/db/schema.sql first so a fresh database works in one step.
  */
 
-import { getDb, id } from './index';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getPool, id, query } from './index';
 import { STAGE_TEMPLATES } from '../domain/rules';
 import { SONG_STAGES, type SongStage } from '../domain/types';
 
-const db = getDb();
-
-db.exec(`
-  DELETE FROM link; DELETE FROM task_board; DELETE FROM song_subtask;
-  DELETE FROM subtask; DELETE FROM song; DELETE FROM task;
-  DELETE FROM metric_entry; DELETE FROM goal; DELETE FROM pillar;
-  DELETE FROM board; DELETE FROM aim;
-`);
-
-const NOW = new Date().toISOString();
-
-// --- the white light --------------------------------------------------------
-
 const AIM = 'aim_2026';
-db.prepare('INSERT INTO aim (id,title,body,year) VALUES (?,?,?,?)').run(
-  AIM,
-  'My Macro Vision + Definite Chief Aim',
-  'The one aim the five pillars decompose. Held in The Core alongside 2026 Main Focus and My Ideal Week.',
-  2026,
-);
-
-// --- pillars ----------------------------------------------------------------
 
 const PILLARS: [string, string, string, number, number][] = [
   ['p_career', 'Career',
@@ -46,15 +30,6 @@ const PILLARS: [string, string, string, number, number][] = [
   ['p_health', 'Health & Life',
     'I am healthy, grounded, and supported by an environment that amplifies my life.', 5, 4],
 ];
-
-const insPillar = db.prepare(
-  'INSERT INTO pillar (id,aim_id,name,affirmation,stars,hue_order) VALUES (?,?,?,?,?,?)',
-);
-for (const [pid, name, aff, stars, hue] of PILLARS) {
-  insPillar.run(pid, AIM, name, aff, stars, hue);
-}
-
-// --- goals (37, exactly as they sit on the board) ---------------------------
 
 type G = [string, string, boolean, ('rollup' | 'metric' | 'manual')?, number?];
 
@@ -108,39 +83,10 @@ const GOALS: Record<string, G[]> = {
   ],
 };
 
-const insGoal = db.prepare(
-  `INSERT INTO goal (id,pillar_id,title,progress_mode,target,manual_progress,closed_at)
-   VALUES (?,?,?,?,?,?,?)`,
-);
-let goalCount = 0;
-for (const [pid, list] of Object.entries(GOALS)) {
-  for (const [gid, title, closed, mode = 'rollup', target = null] of list) {
-    insGoal.run(gid, pid, title, mode, target, null, closed ? NOW : null);
-    goalCount++;
-  }
-}
-
-// A couple of real logged values so metric goals aren't empty shells.
-const insMetric = db.prepare(
-  'INSERT INTO metric_entry (id,goal_id,value,logged_at) VALUES (?,?,?,?)',
-);
-insMetric.run(id('m'), 'g_networth', 41200, NOW);
-insMetric.run(id('m'), 'g_50k_list', 10400, NOW);
-
-// --- boards -----------------------------------------------------------------
-
-db.prepare('INSERT INTO board (id,name,view_type) VALUES (?,?,?)').run(
-  'b_master', 'Master Board', 'priority');
-db.prepare('INSERT INTO board (id,name,view_type) VALUES (?,?,?)').run(
-  'b_songs', 'Song Production', 'stage');
-
-// --- master board tasks -----------------------------------------------------
-
 type T = [string, string | null, string | null, string | null, string | null];
 //        title, priority,       pillar,        due,           recurrence
 
 const TASKS: T[] = [
-  // Top Priority — the pillar names you already wrote out by hand
   ['Edenglass', 'top', 'p_music', null, null],
   ['Auvora', 'top', 'p_wealth', null, null],
   ['Health Work', 'top', 'p_health', null, null],
@@ -159,7 +105,6 @@ const TASKS: T[] = [
   ['Yearly: Goal Review + Goal Setting', 'recurring', null, '2026-12-28', 'yearly'],
   ['Weekly: Content Planning', 'recurring', 'p_music', '2026-09-14', 'weekly'],
 
-  // Parking Lot
   ['GPD: Guitar Practice AI App', 'parking', 'p_wealth', null, null],
   ['GPD: Create New Book', 'parking', 'p_wealth', null, null],
   ['GPD: Pathway by Design Exercises', 'parking', 'p_wealth', null, null],
@@ -201,24 +146,11 @@ const TASKS: T[] = [
   ['Weekly: Content & Ad Performance', 'parking', 'p_wealth', null, 'weekly'],
   ['Bi-Monthly: Bulk Content Creation', 'parking', 'p_brand', null, 'bimonthly'],
 
-  // A brand-new task, deliberately unlabelled — it lands in Unsorted.
+  // Deliberately unlabelled — it lands in Unsorted.
   ['Wire Arc to Supabase', null, null, null, null],
 ];
 
-const insTask = db.prepare(
-  `INSERT INTO task (id,title,priority,status,due_date,recurrence,pillar_id,goal_id,assignee,position,created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-);
-const insTaskBoard = db.prepare(
-  'INSERT INTO task_board (task_id,board_id,position) VALUES (?,?,?)');
-
-TASKS.forEach(([title, priority, pillar, due, rec], i) => {
-  const tid = id('t');
-  insTask.run(tid, title, priority, 'active', due, rec, pillar, null, 'Coco Lee', i, NOW);
-  insTaskBoard.run(tid, 'b_master', i);
-});
-
-// Completed work, so the pillars have something to recombine from.
+/** Completed work, so the pillars have something to recombine from. */
 const DONE: [string, string][] = [
   ['Marketing Strategist Vetting', 'p_career'],
   ['5-Year Roadmap Project', 'p_career'],
@@ -237,13 +169,6 @@ const DONE: [string, string][] = [
   ['Write Wealth Plan', 'p_wealth'],
   ['Launch Personal Brand Site', 'p_brand'],
 ];
-DONE.forEach(([title, pillar], i) => {
-  const tid = id('t');
-  insTask.run(tid, title, 'top', 'done', null, null, pillar, null, 'Coco Lee', 500 + i, NOW);
-  insTaskBoard.run(tid, 'b_master', 500 + i);
-});
-
-// --- songs ------------------------------------------------------------------
 
 const SONGS: [string, SongStage | null][] = [
   ['cerulean', 'backlog'], ['amazed', 'backlog'], ['black milk', 'backlog'],
@@ -259,58 +184,135 @@ const SONGS: [string, SongStage | null][] = [
   ['angels', 'demo'], ['cryptic', 'demo'],
   ['parallels', 'tracking'],
   ['bloom', 'released'], ['primal', 'released'],
-  // A brand-new song with no stage — sits unlabelled until you assign one.
+  // Brand-new, no stage — sits unlabelled until you assign one.
   ['untitled sketch', null],
 ];
 
-const insSong = db.prepare(
-  'INSERT INTO song (id,title,stage,assignee,position) VALUES (?,?,?,?,?)');
-const insSongSub = db.prepare(
-  'INSERT INTO song_subtask (id,song_id,title,done,phase,position) VALUES (?,?,?,?,?,?)');
-
-/** Which songs have finished which of their stage checklists, from the board. */
+/** How far each song has actually got, from the board. */
 const DONE_THROUGH: Record<string, SongStage | 'all'> = {
   'dark ozark': 'demo', 'light ozark': 'demo',
   parallels: 'demo',
   bloom: 'all', primal: 'all',
 };
 
-SONGS.forEach(([title, stage], i) => {
-  const sid = id('s');
-  insSong.run(sid, title, stage, null, i);
-  if (!stage) return;
+async function main() {
+  await query(readFileSync(join(process.cwd(), 'src/db/schema.sql'), 'utf8'));
 
-  const upTo = SONG_STAGES.indexOf(stage);
-  let pos = 0;
-  for (let si = 0; si <= upTo; si++) {
-    const st = SONG_STAGES[si];
-    for (const t of STAGE_TEMPLATES[st]) {
-      const through = DONE_THROUGH[title];
-      let done = 0;
-      if (through === 'all') done = 1;
-      else if (through && SONG_STAGES.indexOf(through) >= si) {
-        // Partial: only the first item of the reached stage, matching the board.
-        done = title === 'parallels' ? 1 : (t === 'Deliver First Demo' ? 1 : 0);
-      }
-      insSongSub.run(id('ss'), sid, t, done, st, pos++);
+  await query(`
+    DELETE FROM link; DELETE FROM task_board; DELETE FROM song_subtask;
+    DELETE FROM subtask; DELETE FROM song; DELETE FROM task;
+    DELETE FROM metric_entry; DELETE FROM goal; DELETE FROM pillar;
+    DELETE FROM board; DELETE FROM aim;
+  `);
+
+  await query(
+    'INSERT INTO aim (id,title,body,year) VALUES ($1,$2,$3,$4)',
+    [AIM, 'My Macro Vision + Definite Chief Aim',
+     'The one aim the five pillars decompose. Held in The Core alongside 2026 Main Focus and My Ideal Week.',
+     2026],
+  );
+
+  for (const [pid, name, aff, stars, hue] of PILLARS) {
+    await query(
+      'INSERT INTO pillar (id,aim_id,name,affirmation,stars,hue_order) VALUES ($1,$2,$3,$4,$5,$6)',
+      [pid, AIM, name, aff, stars, hue],
+    );
+  }
+
+  let goals = 0;
+  const now = new Date().toISOString();
+  for (const [pid, list] of Object.entries(GOALS)) {
+    for (const [gid, title, closed, mode = 'rollup', target = null] of list) {
+      await query(
+        `INSERT INTO goal (id,pillar_id,title,progress_mode,target,closed_at)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [gid, pid, title, mode, target, closed ? now : null],
+      );
+      goals++;
     }
   }
-  // primal is 14/16 on the board — two Planning items still open.
-  if (title === 'primal') {
-    db.prepare(
-      `UPDATE song_subtask SET done = 0
-       WHERE song_id = ? AND title IN ('Create Videos, Content','Schedule Release')`,
-    ).run(sid);
+
+  await query('INSERT INTO metric_entry (id,goal_id,value,logged_at) VALUES ($1,$2,$3,$4)',
+    [id('m'), 'g_networth', 41200, now]);
+  await query('INSERT INTO metric_entry (id,goal_id,value,logged_at) VALUES ($1,$2,$3,$4)',
+    [id('m'), 'g_50k_list', 10400, now]);
+
+  await query('INSERT INTO board (id,name,view_type) VALUES ($1,$2,$3)',
+    ['b_master', 'Master Board', 'priority']);
+  await query('INSERT INTO board (id,name,view_type) VALUES ($1,$2,$3)',
+    ['b_songs', 'Song Production', 'stage']);
+
+  const addTask = async (
+    title: string, priority: string | null, status: string,
+    due: string | null, rec: string | null, pillar: string | null, pos: number,
+  ) => {
+    const tid = id('t');
+    await query(
+      `INSERT INTO task (id,title,priority,status,due_date,recurrence,pillar_id,assignee,position)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'Coco Lee',$8)`,
+      [tid, title, priority, status, due, rec, pillar, pos],
+    );
+    await query('INSERT INTO task_board (task_id,board_id,position) VALUES ($1,$2,$3)',
+      [tid, 'b_master', pos]);
+  };
+
+  let i = 0;
+  for (const [title, priority, pillar, due, rec] of TASKS) {
+    await addTask(title, priority, 'active', due, rec, pillar, i++);
   }
+  i = 500;
+  for (const [title, pillar] of DONE) {
+    await addTask(title, 'top', 'done', null, null, pillar, i++);
+  }
+
+  let songs = 0, songSubs = 0;
+  for (const [pos, [title, stage]] of SONGS.entries()) {
+    const sid = id('s');
+    await query('INSERT INTO song (id,title,stage,position) VALUES ($1,$2,$3,$4)',
+      [sid, title, stage, pos]);
+    songs++;
+    if (!stage) continue;
+
+    const upTo = SONG_STAGES.indexOf(stage);
+    let sp = 0;
+    for (let si = 0; si <= upTo; si++) {
+      const st = SONG_STAGES[si];
+      for (const t of STAGE_TEMPLATES[st]) {
+        const through = DONE_THROUGH[title];
+        let done = false;
+        if (through === 'all') done = true;
+        else if (through && SONG_STAGES.indexOf(through) >= si) {
+          done = title === 'parallels' ? true : t === 'Deliver First Demo';
+        }
+        await query(
+          `INSERT INTO song_subtask (id,song_id,title,done,phase,position)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [id('ss'), sid, t, done, st, sp++],
+        );
+        songSubs++;
+      }
+    }
+    // primal is 14/16 on the board — two Planning items still open.
+    if (title === 'primal') {
+      await query(
+        `UPDATE song_subtask SET done = FALSE
+          WHERE song_id = $1 AND title IN ('Create Videos, Content','Schedule Release')`,
+        [sid],
+      );
+    }
+  }
+
+  console.log('Seeded Arc:');
+  console.log('  pillars      ', PILLARS.length);
+  console.log('  goals        ', goals);
+  console.log('  tasks        ', TASKS.length + DONE.length);
+  console.log('  songs        ', songs);
+  console.log('  song subtasks', songSubs);
+
+  await getPool().end();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });
-
-// --- report -----------------------------------------------------------------
-
-const n = (q: string) => (db.prepare(q).get() as { c: number }).c;
-console.log('Seeded Arc:');
-console.log('  pillars      ', n('SELECT COUNT(*) c FROM pillar'));
-console.log('  goals        ', goalCount,
-  '(' + n('SELECT COUNT(*) c FROM goal WHERE closed_at IS NOT NULL') + ' closed)');
-console.log('  tasks        ', n('SELECT COUNT(*) c FROM task'));
-console.log('  songs        ', n('SELECT COUNT(*) c FROM song'));
-console.log('  song subtasks', n('SELECT COUNT(*) c FROM song_subtask'));

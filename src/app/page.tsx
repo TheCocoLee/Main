@@ -1,13 +1,16 @@
-import Torus from '@/components/Torus';
+import Prism from '@/components/Prism';
 import { bandColor, toHex } from '@/domain/rules';
 import { getAim, getPillars, getRecombined } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 
-export default function PrismPage() {
-  const pillars = getPillars();
-  const aim = getAim();
-  const { now, balanced } = getRecombined();
+export default async function PrismPage() {
+  const [pillars, aim, recombined] = await Promise.all([
+    getPillars(),
+    getAim(),
+    getRecombined(),
+  ]);
+  const { now, balanced } = recombined;
 
   const at = (i: number) => (pillars.length <= 1 ? 0.5 : i / (pillars.length - 1));
   const widest = [...pillars].sort((a, b) => b.gap - a.gap).slice(0, 2);
@@ -20,8 +23,8 @@ export default function PrismPage() {
       </h1>
       <p className="sub">{aim?.title}</p>
 
-      <div className="torus-wrap">
-        <Torus pillars={pillars} />
+      <div className="prism-wrap">
+        <Prism pillars={pillars} />
 
         <div>
           <div className="legend">

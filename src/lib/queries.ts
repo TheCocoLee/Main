@@ -1,4 +1,4 @@
-import { getDb } from '@/db';
+import { query } from '@/db';
 import {
   bucketFor,
   progressOf,
@@ -9,48 +9,43 @@ import {
 } from '@/domain/rules';
 import type { Bucket, Pillar, Song, SongStage, Subtask, Task } from '@/domain/types';
 
-type Row = Record<string, any>;
-
-const toTask = (r: Row): Task => ({
-  id: r.id,
-  title: r.title,
-  priority: r.priority,
-  status: r.status,
-  dueDate: r.due_date,
-  recurrence: r.recurrence,
-  pillarId: r.pillar_id,
-  goalId: r.goal_id,
-  assignee: r.assignee,
-  position: r.position,
-});
+/**
+ * Dates are selected as text rather than left to node-postgres.
+ *
+ * A Postgres DATE arrives as a JS Date at local midnight, which shifts a day
+ * either side of UTC and would make "due today" wrong depending on where you
+ * open the app. The domain works in 'YYYY-MM-DD' strings throughout, so the
+ * cast happens once, here, in SQL.
+ */
+const DUE = `to_char(t.due_date, 'YYYY-MM-DD') AS due_date`;
 
 export interface PillarView extends Pillar {
   goalsTotal: number;
   goalsDone: number;
   /** Completed goals as a percentage. Computed, never entered. */
   progress: number;
-  /** Stars expressed on the same 0–100 scale, for comparison against progress. */
+  /** Stars on the same 0-100 scale, for comparison against progress. */
   felt: number;
   gap: number;
 }
 
-export function getPillars(): PillarView[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT p.*,
-              COUNT(g.id)                                        AS goals_total,
-              SUM(CASE WHEN g.closed_at IS NOT NULL THEN 1 ELSE 0 END) AS goals_done
-         FROM pillar p
-    LEFT JOIN goal g ON g.pillar_id = p.id
-     GROUP BY p.id
-     ORDER BY p.hue_order`,
-    )
-    .all() as Row[];
+export async function getPillars(): Promise<PillarView[]> {
+  const rows = await query<{
+    id: string; aim_id: string; name: string; affirmation: string;
+    stars: number; hue_order: number; goals_total: string; goals_done: string;
+  }>(
+    `SELECT p.id, p.aim_id, p.name, p.affirmation, p.stars, p.hue_order,
+            COUNT(g.id)                                            AS goals_total,
+            COUNT(g.id) FILTER (WHERE g.closed_at IS NOT NULL)      AS goals_done
+       FROM pillar p
+  LEFT JOIN goal g ON g.pillar_id = p.id
+   GROUP BY p.id
+   ORDER BY p.hue_order`,
+  );
 
   return rows.map((r) => {
-    const total = Number(r.goals_total) || 0;
-    const done = Number(r.goals_done) || 0;
+    const total = Number(r.goals_total);
+    const done = Number(r.goals_done);
     const progress = total === 0 ? 0 : Math.round((done / total) * 100);
     const felt = r.stars * 20;
     return {
@@ -69,13 +64,16 @@ export function getPillars(): PillarView[] {
   });
 }
 
-export function getAim() {
-  return getDb().prepare('SELECT * FROM aim LIMIT 1').get() as Row | undefined;
+export async function getAim() {
+  const [row] = await query<{ id: string; title: string; body: string | null; year: number }>(
+    'SELECT id, title, body, year FROM aim ORDER BY year DESC LIMIT 1',
+  );
+  return row;
 }
 
 /** The second half of the torus: the bands returning to white. */
-export function getRecombined() {
-  const pillars = getPillars();
+export async function getRecombined() {
+  const pillars = await getPillars();
   return recombine(
     pillars.map((p) => ({ hueOrder: p.hueOrder, progress: p.progress })),
     pillars.length,
@@ -99,19 +97,25 @@ export const BUCKETS: { key: Bucket; label: string }[] = [
   { key: 'completed', label: 'Completed' },
 ];
 
-export function getBoard(ref = today()): Record<Bucket, TaskView[]> {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT t.*, p.name AS pillar_name, p.hue_order AS pillar_hue,
-              (SELECT COUNT(*) FROM subtask s WHERE s.task_id = t.id) AS sub_total,
-              (SELECT COUNT(*) FROM subtask s WHERE s.task_id = t.id AND s.done = 1) AS sub_done
-         FROM task t
-    LEFT JOIN pillar p ON p.id = t.pillar_id
-         JOIN task_board tb ON tb.task_id = t.id AND tb.board_id = 'b_master'
-     ORDER BY t.position`,
-    )
-    .all() as Row[];
+export async function getBoard(ref = today()): Promise<Record<Bucket, TaskView[]>> {
+  const rows = await query<{
+    id: string; title: string; priority: Task['priority']; status: Task['status'];
+    due_date: string | null; recurrence: Task['recurrence']; pillar_id: string | null;
+    goal_id: string | null; assignee: string | null; position: number;
+    pillar_name: string | null; pillar_hue: number | null;
+    sub_total: string; sub_done: string;
+  }>(
+    `SELECT t.id, t.title, t.priority, t.status, ${DUE}, t.recurrence,
+            t.pillar_id, t.goal_id, t.assignee, t.position,
+            p.name      AS pillar_name,
+            p.hue_order AS pillar_hue,
+            (SELECT COUNT(*) FROM subtask s WHERE s.task_id = t.id)                 AS sub_total,
+            (SELECT COUNT(*) FROM subtask s WHERE s.task_id = t.id AND s.done)      AS sub_done
+       FROM task t
+  LEFT JOIN pillar p ON p.id = t.pillar_id
+       JOIN task_board tb ON tb.task_id = t.id AND tb.board_id = 'b_master'
+   ORDER BY t.position`,
+  );
 
   const out = Object.fromEntries(BUCKETS.map((b) => [b.key, [] as TaskView[]])) as Record<
     Bucket,
@@ -119,15 +123,25 @@ export function getBoard(ref = today()): Record<Bucket, TaskView[]> {
   >;
 
   for (const r of rows) {
-    const t = toTask(r);
-    const view: TaskView = {
-      ...t,
-      pillarName: r.pillar_name ?? null,
-      pillarHue: r.pillar_hue ?? null,
-      subDone: Number(r.sub_done) || 0,
-      subTotal: Number(r.sub_total) || 0,
+    const task: Task = {
+      id: r.id,
+      title: r.title,
+      priority: r.priority,
+      status: r.status,
+      dueDate: r.due_date,
+      recurrence: r.recurrence,
+      pillarId: r.pillar_id,
+      goalId: r.goal_id,
+      assignee: r.assignee,
+      position: r.position,
     };
-    out[bucketFor(t, ref)].push(view);
+    out[bucketFor(task, ref)].push({
+      ...task,
+      pillarName: r.pillar_name,
+      pillarHue: r.pillar_hue,
+      subDone: Number(r.sub_done),
+      subTotal: Number(r.sub_total),
+    });
   }
 
   for (const k of Object.keys(out) as Bucket[]) {
@@ -144,24 +158,33 @@ export interface SongView extends Song {
   canAdvanceTo: SongStage | null;
 }
 
-export function getSongs(): SongView[] {
-  const db = getDb();
-  const songs = db.prepare('SELECT * FROM song ORDER BY position').all() as Row[];
-  const subs = db
-    .prepare('SELECT * FROM song_subtask ORDER BY position')
-    .all() as Row[];
+export async function getSongs(): Promise<SongView[]> {
+  const songs = await query<{
+    id: string; title: string; stage: SongStage | null;
+    assignee: string | null; position: number;
+  }>('SELECT id, title, stage, assignee, position FROM song ORDER BY position');
+
+  const subs = await query<{
+    id: string; song_id: string; title: string;
+    done: boolean; phase: string | null; position: number;
+  }>('SELECT id, song_id, title, done, phase, position FROM song_subtask ORDER BY position');
+
+  const bySong = new Map<string, Subtask[]>();
+  for (const s of subs) {
+    const list = bySong.get(s.song_id) ?? [];
+    list.push({
+      id: s.id, taskId: s.song_id, title: s.title,
+      done: s.done, phase: s.phase, position: s.position,
+    });
+    bySong.set(s.song_id, list);
+  }
 
   return songs.map((r) => {
     const song: Song = {
       id: r.id, title: r.title, stage: r.stage,
       assignee: r.assignee, position: r.position,
     };
-    const mine: Subtask[] = subs
-      .filter((s) => s.song_id === r.id)
-      .map((s) => ({
-        id: s.id, taskId: s.song_id, title: s.title,
-        done: !!s.done, phase: s.phase, position: s.position,
-      }));
+    const mine = bySong.get(r.id) ?? [];
     const { done, total, pct } = progressOf(mine);
     return { ...song, subtasks: mine, done, total, pct, canAdvanceTo: readyToAdvance(song, mine) };
   });

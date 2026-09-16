@@ -1,8 +1,7 @@
 -- Arc schema.
 --
--- Written in portable SQL so the move to Supabase Postgres is a driver swap
--- rather than a rewrite. The only SQLite-isms are TEXT primary keys (fine in
--- Postgres) and INTEGER booleans (Postgres: BOOLEAN).
+-- Postgres. Applied to Supabase as the `arc_initial_schema` migration; the seed
+-- re-applies it so a fresh database comes up in one step.
 
 CREATE TABLE IF NOT EXISTS aim (
   id          TEXT PRIMARY KEY,
@@ -28,9 +27,9 @@ CREATE TABLE IF NOT EXISTS goal (
   title           TEXT NOT NULL,
   progress_mode   TEXT NOT NULL DEFAULT 'rollup'
                     CHECK (progress_mode IN ('rollup','metric','manual')),
-  target          REAL,
-  manual_progress REAL,
-  closed_at       TEXT
+  target          DOUBLE PRECISION,
+  manual_progress DOUBLE PRECISION,
+  closed_at       TIMESTAMPTZ
 );
 
 -- Metric goals log a value per tap. Never a field to keep up to date: the
@@ -38,8 +37,8 @@ CREATE TABLE IF NOT EXISTS goal (
 CREATE TABLE IF NOT EXISTS metric_entry (
   id        TEXT PRIMARY KEY,
   goal_id   TEXT NOT NULL REFERENCES goal(id) ON DELETE CASCADE,
-  value     REAL NOT NULL,
-  logged_at TEXT NOT NULL
+  value     DOUBLE PRECISION NOT NULL,
+  logged_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS board (
@@ -57,21 +56,21 @@ CREATE TABLE IF NOT EXISTS task (
   priority   TEXT CHECK (priority IN ('top','high','low','recurring','parking')),
   status     TEXT NOT NULL DEFAULT 'active'
                CHECK (status IN ('active','in_progress','ready','stuck','done')),
-  due_date   TEXT,
+  due_date   DATE,
   recurrence TEXT CHECK (recurrence IN
                ('daily','weekly','biweekly','monthly','bimonthly','yearly')),
   pillar_id  TEXT REFERENCES pillar(id) ON DELETE SET NULL,
   goal_id    TEXT REFERENCES goal(id) ON DELETE SET NULL,
   assignee   TEXT,
   position   INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS subtask (
   id       TEXT PRIMARY KEY,
   task_id  TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
   title    TEXT NOT NULL,
-  done     INTEGER NOT NULL DEFAULT 0,
+  done     BOOLEAN NOT NULL DEFAULT FALSE,
   phase    TEXT,
   position INTEGER NOT NULL DEFAULT 0
 );
@@ -89,7 +88,7 @@ CREATE TABLE IF NOT EXISTS song_subtask (
   id       TEXT PRIMARY KEY,
   song_id  TEXT NOT NULL REFERENCES song(id) ON DELETE CASCADE,
   title    TEXT NOT NULL,
-  done     INTEGER NOT NULL DEFAULT 0,
+  done     BOOLEAN NOT NULL DEFAULT FALSE,
   phase    TEXT,
   position INTEGER NOT NULL DEFAULT 0
 );
@@ -121,3 +120,20 @@ CREATE INDEX IF NOT EXISTS idx_goal_pillar   ON goal(pillar_id);
 CREATE INDEX IF NOT EXISTS idx_subtask_task  ON subtask(task_id);
 CREATE INDEX IF NOT EXISTS idx_songsub_song  ON song_subtask(song_id);
 CREATE INDEX IF NOT EXISTS idx_link_to       ON link(to_type, to_id);
+
+-- Supabase publishes every table in `public` through PostgREST, reachable with
+-- the anon key that ships in any browser bundle. RLS is enabled with NO
+-- policies, so that path returns nothing to anyone. Arc connects over a direct
+-- Postgres connection as the owner, which bypasses RLS: the app keeps full
+-- access while the public API surface stays shut.
+ALTER TABLE aim          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pillar       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE goal         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE metric_entry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE board        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subtask      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE song         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE song_subtask ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_board   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE link         ENABLE ROW LEVEL SECURITY;

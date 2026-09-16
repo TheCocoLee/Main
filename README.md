@@ -16,9 +16,9 @@ npm test         # domain rules
 
 ## The three screens
 
-- **`/`** — the Prism. One aim at the centre, five bands reaching out by
-  completed work, dashed outlines showing how far along you feel. The space
-  between is the gap.
+- **`/`** — the Prism. A white beam enters from above, refracts, and lands on
+  five arch-capped pillars. How high the colour climbs is completed work; the
+  dashed line is how far along you feel. The space between is the gap.
 - **`/board`** — the Master Board. Seven columns, `priority` doubling as the
   column, tasks carrying their pillar.
 - **`/songs`** — Song Production. Six stages, each contributing its checklist.
@@ -76,6 +76,16 @@ carrying a field to maintain.
 
 ## Storage
 
-SQLite via `better-sqlite3`, schema in `src/db/schema.sql` written in portable
-SQL. Moving to Supabase Postgres is a driver swap: `TEXT` keys carry over,
-`INTEGER` booleans become `BOOLEAN`.
+Supabase Postgres. Schema in `src/db/schema.sql`, applied to Supabase as the
+`arc_initial_schema` migration; `npm run seed` re-applies it, so a fresh
+database comes up in one step.
+
+Arc connects over a direct Postgres connection as the table owner. Every table
+has **RLS enabled with no policies**, so the PostgREST endpoint Supabase exposes
+with the anon key returns nothing to anyone, while the app keeps full access.
+
+Set `DATABASE_URL` in `.env.local` (see `.env.example`). Use the **pooler**
+connection string from Supabase — Project Settings → Database → Connection
+string → Transaction pooler. It presents a publicly trusted certificate, so TLS
+verifies normally, and it survives serverless environments that would exhaust
+the direct connection limit.

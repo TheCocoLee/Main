@@ -29,8 +29,7 @@ export default async function BoardPage({
 }) {
   const view: ViewMode = parseView((await searchParams).view);
   const refDate = today();
-  const board = getBoard(refDate);
-  const pillars = getPillars();
+  const [board, pillars] = await Promise.all([getBoard(refDate), getPillars()]);
 
   const hueOf = (h: number | null) =>
     h === null ? null : toHex(bandColor(pillars.length <= 1 ? 0.5 : h / (pillars.length - 1)));
